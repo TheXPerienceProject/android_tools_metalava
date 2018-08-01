@@ -85,6 +85,11 @@ interface ModifierList {
         return annotations().any { it.isNonNull() || it.isNullable() }
     }
 
+    /** Returns true if this modifier list contains any a Nullable annotation */
+    fun isNullable(): Boolean {
+        return annotations().any { it.isNullable() }
+    }
+
     /**
      * Returns true if this modifier list contains any annotations explicitly passed in
      * via [Options.showAnnotations]
@@ -184,8 +189,9 @@ interface ModifierList {
             removeAbstract: Boolean = false,
             removeFinal: Boolean = false,
             addPublic: Boolean = false,
-            onlyIncludeSignatureAnnotations: Boolean = true
-
+            onlyIncludeSignatureAnnotations: Boolean = true,
+            onlyIncludeStubAnnotations: Boolean = false,
+            onlyIncludeClassRetentionAnnotations: Boolean = false
         ) {
 
             val list = if (removeAbstract || removeFinal || addPublic) {
@@ -214,7 +220,9 @@ interface ModifierList {
                     omitCommonPackages = omitCommonPackages,
                     separateLines = false,
                     writer = writer,
-                    onlyIncludeSignatureAnnotations = onlyIncludeSignatureAnnotations
+                    onlyIncludeSignatureAnnotations = onlyIncludeSignatureAnnotations,
+                    onlyIncludeStubAnnotations = onlyIncludeStubAnnotations,
+                    onlyIncludeClassRetentionAnnotations = onlyIncludeClassRetentionAnnotations
                 )
             }
 
@@ -387,19 +395,27 @@ interface ModifierList {
             separateLines: Boolean = false,
             filterDuplicates: Boolean = false,
             writer: Writer,
-            onlyIncludeSignatureAnnotations: Boolean = true
+            onlyIncludeSignatureAnnotations: Boolean = true,
+            onlyIncludeStubAnnotations: Boolean = true,
+            onlyIncludeClassRetentionAnnotations: Boolean = false
         ) {
             val annotations = list.annotations()
             if (annotations.isNotEmpty()) {
                 var index = -1
                 for (annotation in annotations) {
                     index++
-                    if ((annotation.isNonNull() || annotation.isNullable())) {
+                    if (onlyIncludeSignatureAnnotations && !annotation.isSignificantInSignatures()) {
+                        continue
+                    } else if (onlyIncludeStubAnnotations && !annotation.isSignificantInStubs()) {
+                        continue
+                    } else if (onlyIncludeClassRetentionAnnotations && !annotation.hasClassRetention() &&
+                        !options.includeSourceRetentionAnnotations
+                    ) {
+                        continue
+                    } else if ((annotation.isNonNull() || annotation.isNullable())) {
                         if (skipNullnessAnnotations) {
                             continue
                         }
-                    } else if (onlyIncludeSignatureAnnotations && !annotation.isSignificant()) {
-                        continue
                     }
 
                     // Optionally filter out duplicates

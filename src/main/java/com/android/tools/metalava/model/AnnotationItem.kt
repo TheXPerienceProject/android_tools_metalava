@@ -24,6 +24,7 @@ import com.android.SdkConstants.STRING_DEF_ANNOTATION
 import com.android.tools.lint.annotations.Extractor.ANDROID_INT_DEF
 import com.android.tools.lint.annotations.Extractor.ANDROID_LONG_DEF
 import com.android.tools.lint.annotations.Extractor.ANDROID_STRING_DEF
+import com.android.tools.lint.detector.api.startsWith
 import com.android.tools.metalava.ANDROIDX_ANNOTATION_PREFIX
 import com.android.tools.metalava.ANDROID_SUPPORT_ANNOTATION_PREFIX
 import com.android.tools.metalava.JAVA_LANG_PREFIX
@@ -52,9 +53,22 @@ interface AnnotationItem {
     /** Generates source code for this annotation (using fully qualified names) */
     fun toSource(): String
 
-    /** Whether this annotation is significant and should be included in signature files, stubs, etc */
-    fun isSignificant(): Boolean {
+    /** Whether this annotation is significant and should be included in signature files */
+    fun isSignificantInSignatures(): Boolean {
         return includeInSignatures(qualifiedName() ?: return false)
+    }
+
+    /** Whether this annotation is significant and should be included in stub files etc */
+    fun isSignificantInStubs(): Boolean {
+        return includeInStubs(qualifiedName() ?: return false)
+    }
+
+    /**
+     * Whether this annotation has class retention. Only class retention annotations are
+     * inserted into the stubs, the rest are extracted into the separate external annotations file.
+     */
+    fun hasClassRetention(): Boolean {
+        return hasClassRetention(qualifiedName())
     }
 
     /** Attributes of the annotation (may be empty) */
@@ -129,6 +143,17 @@ interface AnnotationItem {
                 return true
             }
             return false
+        }
+
+        /** Whether the given annotation name is "significant", e.g. should be included in signature files */
+        fun includeInStubs(qualifiedName: String?): Boolean {
+            qualifiedName ?: return false
+            if (includeInSignatures(qualifiedName)) {
+                return true
+            }
+
+            return qualifiedName.startsWith("java.lang.annotation") &&
+                !qualifiedName.endsWith("SuppressWarnings")
         }
 
         /** The simple name of an annotation, which is the annotation name (not qualified name) prefixed by @ */
@@ -250,6 +275,8 @@ interface AnnotationItem {
                 "android.annotation.CheckResult" -> return "androidx.annotation.CheckResult"
                 "android.support.annotation.RequiresPermission",
                 "android.annotation.RequiresPermission" -> return "androidx.annotation.RequiresPermission"
+                "android.annotation.RequiresPermission.Read" -> return "androidx.annotation.RequiresPermission.Read"
+                "android.annotation.RequiresPermission.Write" -> return "androidx.annotation.RequiresPermission.Write"
 
             // These aren't support annotations, but could/should be:
                 "android.annotation.CurrentTimeMillisLong",
@@ -388,6 +415,24 @@ interface AnnotationItem {
                 }
             }
         }
+
+        fun hasClassRetention(qualifiedName: String?): Boolean {
+            // For now, we treat everything except the recently nullable annotations
+            // as source retention; this works around the bug that we don't want to
+            // reference (from the .class files) annotations that aren't part of the SDK
+            // except for those that we include with the stubs
+
+            qualifiedName ?: return false
+
+            return when (qualifiedName) {
+                "androidx.annotation.RecentlyNullable",
+                "androidx.annotation.RecentlyNonNull" -> true
+                else -> qualifiedName.startsWith("java.") ||
+                    qualifiedName.startsWith("javax.") ||
+                    qualifiedName.startsWith("kotlin.") ||
+                    qualifiedName.startsWith("kotlinx.")
+            }
+        }
     }
 }
 
@@ -465,40 +510,74 @@ class DefaultAnnotationAttribute(
         }
 
         fun createList(source: String): List<AnnotationAttribute> {
-            val list = mutableListOf<AnnotationAttribute>()
-            if (source.contains("{")) {
-                assert(
-                    source.indexOf('{', source.indexOf('{', source.indexOf('{') + 1) + 1) != -1
-                ) { "Multiple arrays not supported: $source" }
-                val split = source.indexOf('=')
-                val name: String
-                val value: String
-                if (split == -1) {
-                    name = "value"
-                    value = source.substring(source.indexOf('{'))
-                } else {
-                    name = source.substring(0, split).trim()
-                    value = source.substring(split + 1).trim()
+            val list = mutableListOf<AnnotationAttribute>() // TODO: default size = 2
+            var begin = 0
+            var index = 0
+            val length = source.length
+            while (index < length) {
+                val c = source[index]
+                if (c == '{') {
+                    index = findEnd(source, index + 1, length, '}')
+                } else if (c == '"') {
+                    index = findEnd(source, index + 1, length, '"')
+                } else if (c == ',') {
+                    addAttribute(list, source, begin, index)
+                    index++
+                    begin = index
+                    continue
+                } else if (c == ' ' && index == begin) {
+                    begin++
                 }
-                list.add(DefaultAnnotationAttribute.create(name, value))
-                return list
+
+                index++
             }
 
-            source.split(",").forEach { declaration ->
-                val split = declaration.indexOf('=')
-                val name: String
-                val value: String
-                if (split == -1) {
-                    name = "value"
-                    value = declaration.trim()
-                } else {
-                    name = declaration.substring(0, split).trim()
-                    value = declaration.substring(split + 1).trim()
-                }
-                list.add(DefaultAnnotationAttribute.create(name, value))
+            if (begin < length) {
+                addAttribute(list, source, begin, length)
             }
+
             return list
         }
+
+        private fun findEnd(source: String, from: Int, to: Int, sentinel: Char): Int {
+            var i = from
+            while (i < to) {
+                val c = source[i]
+                if (c == '\\') {
+                    i++
+                } else if (c == sentinel) {
+                    return i
+                }
+                i++
+            }
+            return to
+        }
+
+        private fun addAttribute(list: MutableList<AnnotationAttribute>, source: String, from: Int, to: Int) {
+            var split = source.indexOf('=', from)
+            if (split >= to) {
+                split = -1
+            }
+            val name: String
+            val value: String
+            val valueBegin: Int
+            val valueEnd: Int
+            if (split == -1) {
+                valueBegin = split + 1
+                valueEnd = to
+                name = "value"
+            } else {
+                name = source.substring(from, split).trim()
+                valueBegin = split + 1
+                valueEnd = to
+            }
+            value = source.substring(valueBegin, valueEnd).trim()
+            list.add(DefaultAnnotationAttribute.create(name, value))
+        }
+    }
+
+    override fun toString(): String {
+        return "DefaultAnnotationAttribute(name='$name', value=$value)"
     }
 }
 

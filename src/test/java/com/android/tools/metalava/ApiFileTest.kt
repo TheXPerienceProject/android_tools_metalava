@@ -157,7 +157,7 @@ class ApiFileTest : DriverTest() {
                     package test.pkg
 
                     class Foo {
-                        fun error(int: Int = 42, int2: Int? = null, byte: Int = 42) { }
+                        fun error(int: Int = 42, int2: Int? = null, byte: Int = 42, vararg args: String) { }
                     }
                     """
                 )
@@ -166,7 +166,7 @@ class ApiFileTest : DriverTest() {
                 package test.pkg {
                   public final class Foo {
                     ctor public Foo();
-                    method public void error(int p = "42", Integer? int2 = "null", int p1 = "42");
+                    method public void error(int p = "42", Integer? int2 = "null", int p1 = "42", java.lang.String... args);
                   }
                 }
                 """,
@@ -381,8 +381,8 @@ class ApiFileTest : DriverTest() {
                     inline operator fun <F, S> PlatformJavaPair<F, S>.component1() = first
                     """
                 ),
-                supportNonNullSource,
-                supportNullableSource
+                androidxNonNullSource,
+                androidxNullableSource
             ),
             api = """
                 package androidx.util {
@@ -1027,6 +1027,47 @@ class ApiFileTest : DriverTest() {
                         method public static void method4(int);
                       }
                     }
+                """
+        )
+    }
+
+    @Test
+    fun `Warn about findViewById`() {
+        // Include as many modifiers as possible to see which ones are included
+        // in the signature files, and the expected sorting order.
+        // Note that the signature files treat "deprecated" as a fake modifier.
+        // Note also how the "protected" modifier on the interface method gets
+        // promoted to public.
+        check(
+            checkDoclava1 = true,
+            compatibilityMode = false,
+            outputKotlinStyleNulls = false,
+            sourceFiles = *arrayOf(
+                java(
+                    """
+                    package test.pkg;
+                    import android.annotation.Nullable;
+
+                    @SuppressWarnings("ALL")
+                    public abstract class Foo {
+                        @Nullable public String findViewById(int id) { return ""; }
+                    }
+                    """
+                ),
+                nullableSource
+            ),
+
+            warnings = """
+                src/test/pkg/Foo.java:6: warning: method test.pkg.Foo.findViewById(int) should not be annotated @Nullable; it should be left unspecified to make it a platform type [ExpectedPlatformType:149]
+                """,
+
+            api = """
+                package test.pkg {
+                  public abstract class Foo {
+                    ctor public Foo();
+                    method public String findViewById(int);
+                  }
+                }
                 """
         )
     }
