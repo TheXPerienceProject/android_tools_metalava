@@ -63,6 +63,12 @@ const val CHECK_OLD_DOCLAVA_TOO = false
 const val CHECK_JDIFF = false
 const val CHECK_STUB_COMPILATION = false
 
+/**
+ * Marker class for stubs argument to [DriverTest.check] indicating that no
+ * stubs should be generated for a particular source file.
+ */
+const val NO_STUB = ""
+
 abstract class DriverTest {
     @get:Rule
     var temporaryFolder = TemporaryFolder()
@@ -242,7 +248,8 @@ abstract class DriverTest {
         /** The subtract api signature content (corresponds to --subtract-api) */
         @Language("TEXT")
         subtractApi: String? = null,
-        /** Expected stubs (corresponds to --stubs) */
+        /** Expected stubs (corresponds to --stubs) in order corresponding to [sourceFiles]. Use
+         * [NO_STUB] as a marker for source files that are not expected to generate stubs */
         @Language("JAVA") stubs: Array<String> = emptyArray(),
         /** Stub source file list generated */
         stubsSourceList: String? = null,
@@ -289,8 +296,10 @@ abstract class DriverTest {
         @Language("Proguard") proguard: String? = null,
         /** Show annotations (--show-annotation arguments) */
         showAnnotations: Array<String> = emptyArray(),
-        /** Hide annotations (--hideAnnotation arguments) */
+        /** Hide annotations (--hide-annotation arguments) */
         hideAnnotations: Array<String> = emptyArray(),
+        /** Hide meta-annotations (--hide-meta-annotation arguments) */
+        hideMetaAnnotations: Array<String> = emptyArray(),
         /** If using [showAnnotations], whether to include unannotated */
         showUnannotated: Boolean = false,
         /** Additional arguments to supply */
@@ -710,6 +719,17 @@ abstract class DriverTest {
             emptyArray()
         }
 
+        val hideMetaAnnotationArguments = if (hideMetaAnnotations.isNotEmpty()) {
+            val args = mutableListOf<String>()
+            for (annotation in hideMetaAnnotations) {
+                args.add(ARG_HIDE_META_ANNOTATION)
+                args.add(annotation)
+            }
+            args.toTypedArray()
+        } else {
+            emptyArray()
+        }
+
         val showUnannotatedArgs =
             if (showUnannotated) {
                 arrayOf(ARG_SHOW_UNANNOTATED)
@@ -796,7 +816,7 @@ abstract class DriverTest {
             emptyArray()
         }
 
-        var subtractApiFile: File? = null
+        var subtractApiFile: File?
         val subtractApiArgs = if (subtractApi != null) {
             subtractApiFile = temporaryFolder.newFile("subtract-api.txt")
             subtractApiFile.writeText(subtractApi.trimIndent())
@@ -1056,6 +1076,7 @@ abstract class DriverTest {
             *baselineArgs,
             *showAnnotationArguments,
             *hideAnnotationArguments,
+            *hideMetaAnnotationArguments,
             *showUnannotatedArgs,
             *includeSourceRetentionAnnotationArgs,
             *apiLintArgs,
@@ -1294,25 +1315,26 @@ abstract class DriverTest {
                             stub = stub.substring(pathEnd + 2)
                         }
                     }
-                    if (!stubFile.exists()) {
-                        /* Example:
-                            stubs = arrayOf(
-                                """
-                                [test/visible/package-info.java]
-                                <html>My package docs</html>
-                                package test.visible;
-                                """,
-                                ...
-                           Here the stub will be read from $stubsDir/test/visible/package-info.java.
-                         */
-                        throw FileNotFoundException(
-                            "Could not find generated stub for $targetPath; consider " +
-                                "setting target relative path in stub header as prefix surrounded by []"
-                        )
-                    }
                 }
-                val actualText = readFile(stubFile, stripBlankLines, trim)
-                assertEquals(stub, actualText)
+                if (stubFile.exists()) {
+                    val actualText = readFile(stubFile, stripBlankLines, trim)
+                    assertEquals(stub, actualText)
+                } else if (stub != NO_STUB) {
+                    /* Example:
+                        stubs = arrayOf(
+                            """
+                            [test/visible/package-info.java]
+                            <html>My package docs</html>
+                            package test.visible;
+                            """,
+                            ...
+                       Here the stub will be read from $stubsDir/test/visible/package-info.java.
+                     */
+                    throw FileNotFoundException(
+                        "Could not find generated stub for $targetPath; consider " +
+                            "setting target relative path in stub header as prefix surrounded by []"
+                    )
+                }
             }
         }
 
@@ -2463,6 +2485,31 @@ val visibleForTestingSource: TestFile = java(
         int PACKAGE_PRIVATE = 3;
         int PROTECTED = 4;
         int NONE = 5;
+    }
+    """
+).indented()
+
+val columnSource: TestFile = java(
+    """
+    package android.provider;
+
+    import static java.lang.annotation.ElementType.FIELD;
+    import static java.lang.annotation.RetentionPolicy.RUNTIME;
+
+    import android.content.ContentProvider;
+    import android.content.ContentValues;
+    import android.database.Cursor;
+
+    import java.lang.annotation.Documented;
+    import java.lang.annotation.Retention;
+    import java.lang.annotation.Target;
+
+    @Documented
+    @Retention(RUNTIME)
+    @Target({FIELD})
+    public @interface Column {
+        int value();
+        boolean readOnly() default false;
     }
     """
 ).indented()
