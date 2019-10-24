@@ -15,7 +15,7 @@ buildscript {
 
 buildDir = getBuildDirectory()
 
-defaultTasks = listOf("installDist", "test", "shadowJar", "createArchive")
+defaultTasks = listOf("installDist", "test", "shadowJar", "createArchive", "ktlint")
 
 repositories {
     google()
@@ -54,7 +54,7 @@ tasks.withType(KotlinCompile::class.java) {
     }
 }
 
-val studioVersion: String = "26.4.0-beta01"
+val studioVersion: String = "26.5.0"
 val kotlinVersion: String = "1.3.20"
 
 dependencies {

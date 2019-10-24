@@ -801,11 +801,11 @@ class ApiLintTest : DriverTest() {
             apiLint = "", // enabled
             compatibilityMode = false,
             warnings = """
-                src/android/pkg/MyClass.java:6: warning: Methods must return the builder object (return type Builder instead of void): method android.pkg.MyClass.Builder.setSomething(int) [SetterReturnsThis] [Rule M4 in go/android-api-guidelines]
-                src/android/pkg/MyClass.java:6: warning: Builder methods names should use setFoo() style: method android.pkg.MyClass.Builder.withFoo(int) [BuilderSetStyle]
-                src/android/pkg/MyClass.java:6: warning: Missing `build()` method in android.pkg.MyClass.Builder [MissingBuild]
+                src/android/pkg/MyClass.java:9: warning: Methods must return the builder object (return type android.pkg.MyClass.Builder<T> instead of void): method android.pkg.MyClass.Builder.setSomething(int) [SetterReturnsThis] [Rule M4 in go/android-api-guidelines]
+                src/android/pkg/MyClass.java:10: warning: Builder methods names should use setFoo() style: method android.pkg.MyClass.Builder.withFoo(int) [BuilderSetStyle]
+                src/android/pkg/MyClass.java:6: warning: android.pkg.MyClass.Builder does not declare a `build()` method, but builder classes are expected to [MissingBuildMethod]
                 src/android/pkg/TopLevelBuilder.java:3: warning: Builder should be defined as inner class: android.pkg.TopLevelBuilder [TopLevelBuilder]
-                src/android/pkg/TopLevelBuilder.java:3: warning: Missing `build()` method in android.pkg.TopLevelBuilder [MissingBuild]
+                src/android/pkg/TopLevelBuilder.java:3: warning: android.pkg.TopLevelBuilder does not declare a `build()` method, but builder classes are expected to [MissingBuildMethod]
                 """,
             sourceFiles = *arrayOf(
                 java(
@@ -823,14 +823,14 @@ class ApiLintTest : DriverTest() {
                     import androidx.annotation.NonNull;
 
                     public class MyClass {
-                        public class Builder {
+                        public class Builder<T> {
                             public void clearAll() { }
                             public int getSomething() { return 0; }
                             public void setSomething(int s) { }
                             @NonNull
-                            public Builder withFoo(int s) { return this; }
+                            public Builder<T> withFoo(int s) { return this; }
                             @NonNull
-                            public Builder setOk(int s) { return this; }
+                            public Builder<T> setOk(int s) { return this; }
                         }
                     }
                     """
@@ -1731,8 +1731,8 @@ class ApiLintTest : DriverTest() {
             apiLint = "", // enabled
             compatibilityMode = false,
             warnings = """
-                src/android/pkg/MyErrorClass1.java:3: warning: Classes that release resources should implement AutoClosable and CloseGuard: class android.pkg.MyErrorClass1 [NotCloseable]
-                src/android/pkg/MyErrorClass2.java:3: warning: Classes that release resources should implement AutoClosable and CloseGuard: class android.pkg.MyErrorClass2 [NotCloseable]
+                src/android/pkg/MyErrorClass1.java:3: warning: Classes that release resources (close()) should implement AutoClosable and CloseGuard: class android.pkg.MyErrorClass1 [NotCloseable]
+                src/android/pkg/MyErrorClass2.java:3: warning: Classes that release resources (finalize(), shutdown()) should implement AutoClosable and CloseGuard: class android.pkg.MyErrorClass2 [NotCloseable]
                 """,
             sourceFiles = *arrayOf(
                 java(
@@ -1777,6 +1777,7 @@ class ApiLintTest : DriverTest() {
                     package android.pkg;
 
                     public abstract class MyErrorClass2 {
+                        public void finalize() {}
                         public void shutdown() {}
                     }
                     """
@@ -2285,6 +2286,51 @@ class ApiLintTest : DriverTest() {
                             @NonNull
                             public Foo methodMissingParamAnnotations(java.time.Duration duration) {
                                 throw UnsupportedOperationException();
+                            }
+                        }
+                    """
+                ),
+                androidxNullableSource,
+                androidxNonNullSource
+            )
+        )
+    }
+
+    @Test
+    fun `Test equals, toString, non-null constants, enums and annotation members don't require nullability`() {
+        check(
+            apiLint = "", // enabled
+            compatibilityMode = false,
+            warnings = "",
+            sourceFiles = *arrayOf(
+                java(
+                    """
+                        package android.pkg;
+
+                        import android.annotation.SuppressLint;
+
+                        public class Foo<T> {
+                            public static final String FOO_CONSTANT = "test";
+
+                            public boolean equals(Object other) {
+                                return other == this;
+                            }
+
+                            public int hashCode() {
+                                return 0;
+                            }
+
+                            public String toString() {
+                                return "Foo";
+                            }
+
+                            @SuppressLint("Enum")
+                            public enum FooEnum {
+                                FOO, BAR;
+                            }
+
+                            public @interface FooAnnotation {
+                                String value() default "";
                             }
                         }
                     """
