@@ -90,7 +90,7 @@ import com.android.tools.metalava.doclava1.Errors.MENTIONS_GOOGLE
 import com.android.tools.metalava.doclava1.Errors.METHOD_NAME_TENSE
 import com.android.tools.metalava.doclava1.Errors.METHOD_NAME_UNITS
 import com.android.tools.metalava.doclava1.Errors.MIN_MAX_CONSTANT
-import com.android.tools.metalava.doclava1.Errors.MISSING_BUILD
+import com.android.tools.metalava.doclava1.Errors.MISSING_BUILD_METHOD
 import com.android.tools.metalava.doclava1.Errors.MISSING_NULLABILITY
 import com.android.tools.metalava.doclava1.Errors.NOT_CLOSEABLE
 import com.android.tools.metalava.doclava1.Errors.NO_BYTE_OR_SHORT
@@ -127,6 +127,7 @@ import com.android.tools.metalava.doclava1.Errors.USER_HANDLE_NAME
 import com.android.tools.metalava.doclava1.Errors.USE_ICU
 import com.android.tools.metalava.doclava1.Errors.USE_PARCEL_FILE_DESCRIPTOR
 import com.android.tools.metalava.doclava1.Errors.VISIBLY_SYNCHRONIZED
+import com.android.tools.metalava.model.AnnotationItem.Companion.getImplicitNullness
 import com.android.tools.metalava.model.ClassItem
 import com.android.tools.metalava.model.Codebase
 import com.android.tools.metalava.model.ConstructorItem
@@ -1237,23 +1238,23 @@ class ApiLint(private val codebase: Codebase, private val oldCodebase: Codebase?
                 continue
             } else if (name.startsWith("with")) {
                 report(
-                    BUILDER_SET_STYLE, cls,
+                    BUILDER_SET_STYLE, method,
                     "Builder methods names should use setFoo() style: ${method.describe()}"
                 )
             } else if (name.startsWith("set")) {
                 val returnType = method.returnType()?.toTypeString() ?: ""
-                if (returnType != cls.qualifiedName()) {
+                if (returnType != cls.toType().toTypeString()) {
                     report(
-                        SETTER_RETURNS_THIS, cls,
-                        "Methods must return the builder object (return type ${cls.simpleName()} instead of $returnType): ${method.describe()}"
+                        SETTER_RETURNS_THIS, method,
+                        "Methods must return the builder object (return type ${cls.toType().toTypeString()} instead of $returnType): ${method.describe()}"
                     )
                 }
             }
         }
         if (!hasBuild) {
             report(
-                MISSING_BUILD, cls,
-                "Missing `build()` method in ${cls.qualifiedName()}"
+                MISSING_BUILD_METHOD, cls,
+                "${cls.qualifiedName()} does not declare a `build()` method, but builder classes are expected to"
             )
         }
     }
@@ -1779,13 +1780,14 @@ class ApiLint(private val codebase: Codebase, private val oldCodebase: Codebase?
     }
 
     private fun checkHasNullability(item: Item) {
-        if (item.requiresNullnessInfo() && !item.hasNullnessInfo()) {
+        if (item.requiresNullnessInfo() && !item.hasNullnessInfo() &&
+                getImplicitNullness(item) == null) {
             val type = item.type()
             if (type != null && type.isTypeParameter()) {
-              // Generic types should have declarations of nullability set at the site of where
-              // the type is set, so that for Foo<T>, T does not need to specify nullability, but
-              // for Foo<Bar>, Bar does.
-              return // Do not enforce nullability for generics
+                // Generic types should have declarations of nullability set at the site of where
+                // the type is set, so that for Foo<T>, T does not need to specify nullability, but
+                // for Foo<Bar>, Bar does.
+                return // Do not enforce nullability for generics
             }
             val where = when (item) {
                 is ParameterItem -> "parameter `${item.name()}` in method `${item.parent()?.name()}`"
@@ -2716,20 +2718,17 @@ class ApiLint(private val codebase: Codebase, private val oldCodebase: Codebase?
                         warn(clazz, m, None, "Classes that release resources should implement AutoClosable and CloseGuard")
                         return
          */
-        var requireCloseable = false
-        loop@ for (method in methods) {
-            val name = method.name()
-            when (name) {
-                "close", "release", "destroy", "finish", "finalize", "disconnect", "shutdown", "stop", "free", "quit" -> {
-                    requireCloseable = true
-                    break@loop
-                }
+        val foundMethods = methods.filter { method ->
+            when (method.name()) {
+                "close", "release", "destroy", "finish", "finalize", "disconnect", "shutdown", "stop", "free", "quit" -> true
+                else -> false
             }
         }
-        if (requireCloseable && !cls.implements("java.lang.AutoCloseable")) { // includes java.io.Closeable
+        if (foundMethods.iterator().hasNext() && !cls.implements("java.lang.AutoCloseable")) { // includes java.io.Closeable
+            val foundMethodsDescriptions = foundMethods.joinToString { method -> "${method.name()}()" }
             report(
                 NOT_CLOSEABLE, cls,
-                "Classes that release resources should implement AutoClosable and CloseGuard: ${cls.describe()}"
+                "Classes that release resources ($foundMethodsDescriptions) should implement AutoClosable and CloseGuard: ${cls.describe()}"
             )
         }
     }
