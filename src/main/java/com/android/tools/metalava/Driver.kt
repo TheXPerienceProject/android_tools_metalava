@@ -45,6 +45,7 @@ import com.android.tools.metalava.model.PackageDocs
 import com.android.tools.metalava.model.psi.PsiBasedCodebase
 import com.android.tools.metalava.model.psi.packageHtmlToJavadoc
 import com.android.tools.metalava.model.visitors.ApiVisitor
+import com.android.tools.metalava.stub.StubWriter
 import com.android.utils.StdLogger
 import com.android.utils.StdLogger.Level.ERROR
 import com.google.common.base.Stopwatch
@@ -1154,7 +1155,7 @@ fun gatherSources(sourcePath: List<File>): List<File> {
         }
         addSourceFiles(sources, file.absoluteFile)
     }
-    return sources
+    return sources.sortedWith(compareBy({ it.name }))
 }
 
 private fun addHiddenPackages(
